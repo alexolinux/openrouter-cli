@@ -20,15 +20,18 @@ Manage and interact with OpenRouter's current **FREE LLM models** directly from 
 
 1. **Clone or download** this project.
 2. **Navigate** to the project directory:
+
    ```bash
-   cd openrouter_free
+   cd openrouter-cli
    ```
 3. **Set up a virtual environment** (optional but recommended):
+
    ```bash
    python3 -m venv venv
    source venv/bin/activate
    ```
 4. **Install dependencies**:
+
    ```bash
    pip install -r requirements.txt
    ```
@@ -36,10 +39,12 @@ Manage and interact with OpenRouter's current **FREE LLM models** directly from 
 ## Configuration
 
 1. Copy the example environment file:
+
    ```bash
    cp .env.example .env
    ```
 2. Open `.env` in your favorite editor and add your OpenRouter API Key:
+
    ```env
    OPENROUTER_API_KEY=sk-or-v1-your-key-goes-here
    ```
@@ -53,6 +58,7 @@ python3 main.py
 ```
 
 ### Options:
+
 - **List Free Models**: Displays a table of all currently available free models, their IDs, and context lengths.
 - **Select Model & Chat**: Choose a model and start a direct conversation in your terminal.
 - **Get Config for Cline/Extensions**: Select a model to get the exact configuration details needed for external tools.
@@ -63,4 +69,9 @@ python3 main.py
 - **Connection Error**: Check your internet connection and verify that you can reach `openrouter.ai`.
 
 ---
-*Created with ❤️ for free AI enthusiasts.*
+*Created with ❤️  for free AI enthusiasts.*
+
+## Author
+
+[Alex Mendes](https://www.alexolinux.com)
+
