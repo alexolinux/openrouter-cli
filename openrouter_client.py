@@ -9,8 +9,8 @@ class OpenRouterClient:
         self.base_url = "https://openrouter.ai/api/v1"
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "HTTP-Referer": "https://github.com/alexmbarbosa/freerouter", # Optional, for OpenRouter rankings
-            "X-Title": "FreeRouter CLI", # Optional
+            "HTTP-Referer": "https://github.com/alexolinux/openrouter-cli", # Optional, for OpenRouter rankings
+            "X-Title": "OpenRouter CLI",                                    # Optional
             "Content-Type": "application/json"
         }
 

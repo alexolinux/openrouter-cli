@@ -101,7 +101,7 @@ def main():
     client = OpenRouterClient(api_key)
     
     clear_screen()
-    console.print(Panel.fit("Welcome to [bold cyan]FreeRouter CLI[/] 🚀\nEasily manage and use OpenRouter's free models.", 
+    console.print(Panel.fit("Welcome to [bold cyan]OpenRouter CLI[/] 🚀\nEasily manage and use OpenRouter's free models.", 
                             border_style="bright_magenta"))
     
     free_models = []
