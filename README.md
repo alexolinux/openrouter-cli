@@ -1,10 +1,12 @@
-# OpenRouter CLI 🚀
+# ![openrouter-logo](./img/openrouter.png) OpenRouter CLI
 
 -------------------
 
 Manage and interact with OpenRouter's current **FREE LLM models** directly from your terminal.
 
 ## Features
+
+![img](./img/orcli.png)
 
 - **Real-time Discovery**: Automatically fetches and filters models from OpenRouter to show only those with **$0.00** pricing for both prompts and completions.
 - **Interactive Terminal Chat**: Test the free models instantly with a built-in chat loop featuring markdown support.
