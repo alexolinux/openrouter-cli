@@ -1,4 +1,6 @@
-# FreeRouter CLI 🚀
+# OpenRouter CLI 🚀
+
+-------------------
 
 Manage and interact with OpenRouter's current **FREE LLM models** directly from your terminal.
 
