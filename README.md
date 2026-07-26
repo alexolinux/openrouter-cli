@@ -12,6 +12,7 @@ Manage and interact with OpenRouter's current **FREE LLM models** directly from 
 - **Interactive Terminal Chat**: Test the free models instantly with a built-in chat loop featuring markdown support.
 - **Cline & Extension Helper**: Generates ready-to-use configuration strings and JSON snippets for tools like [Cline](https://github.com/cline/cline) or other IDE extensions.
 - **Modern CLI**: A polished user experience built with `rich` and `questionary`.
+- **Request Monitoring & Controls**: Shows live API-key usage and limits from OpenRouter, plus local request diagnostics and the latest rate-limit headers.
 
 ## Pre-requisites
 
@@ -57,6 +58,15 @@ pip install -r requirements.txt
 
 ```env
 OPENROUTER_API_KEY=your-api-key-goes-here
+
+# Optional: required to display OpenRouter's account-wide request count
+OPENROUTER_MANAGEMENT_API_KEY=your-management-key-goes-here
+
+# Optional: local per-session chat-completion safety cap (0 = disabled)
+OPENROUTER_MAX_REQUESTS=0
+
+# Optional: network timeout for each API call
+OPENROUTER_REQUEST_TIMEOUT_SECONDS=30
 ```
 
 ## Usage
@@ -95,6 +105,14 @@ orcli
 - **List Free Models**: Displays a table of all currently available free models, their IDs, and context lengths.
 - **Select Model & Chat**: Choose a model and start a direct conversation in your terminal.
 - **Get Config for Cline/Extensions**: Select a model to get the exact configuration details needed for external tools.
+- **Show OpenRouter API Key Usage (Live)**: Fetches current usage and configured limits directly from OpenRouter for the configured API key. With `OPENROUTER_MANAGEMENT_API_KEY`, it also shows the authoritative account-wide number of AI requests consumed today (UTC).
+- **Show Session API Usage**: Displays local request usage and any rate-limit values returned by OpenRouter.
+
+### Request limits
+
+`OPENROUTER_MAX_REQUESTS` limits chat-completion calls during the current process; model discovery does not consume this local cap. It is an optional safety cap only and defaults to `0` (disabled). It does not replace OpenRouter's account-level limits.
+
+This is a local safety control; OpenRouter's own limits still apply. When the API includes rate-limit headers, the CLI exposes the latest values in **Show Session API Usage**.
 
 ## Troubleshooting
 
