@@ -13,6 +13,7 @@ Manage and interact with OpenRouter's current **FREE LLM models** directly from 
 - **Cline & Extension Helper**: Generates ready-to-use configuration strings and JSON snippets for tools like [Cline](https://github.com/cline/cline) or other IDE extensions.
 - **Modern CLI**: A polished user experience built with `rich` and `questionary`.
 - **Request Monitoring & Controls**: Shows live API-key usage and limits from OpenRouter, plus local request diagnostics and the latest rate-limit headers.
+- **API Key Management**: Create, rotate, update and delete OpenRouter API keys directly from the CLI using a [Management API Key](https://openrouter.ai/docs/guides/overview/auth/management-api-keys) – ideal for refreshing free-tier keys that have run out of requests.
 
 ## Pre-requisites
 
@@ -60,6 +61,8 @@ pip install -r requirements.txt
 OPENROUTER_API_KEY=your-api-key-goes-here
 
 # Optional: required to display OpenRouter's account-wide request count
+# AND to use the "Manage API Keys" menu (create/rotate/update/delete keys).
+# Create one at https://openrouter.ai/settings/management-keys
 OPENROUTER_MANAGEMENT_API_KEY=your-management-key-goes-here
 
 # Optional: local per-session chat-completion safety cap (0 = disabled)
@@ -107,12 +110,34 @@ orcli
 - **Get Config for Cline/Extensions**: Select a model to get the exact configuration details needed for external tools.
 - **Show OpenRouter API Key Usage (Live)**: Fetches current usage and configured limits directly from OpenRouter for the configured API key. With `OPENROUTER_MANAGEMENT_API_KEY`, it also shows the authoritative account-wide number of AI requests consumed today (UTC).
 - **Show Session API Usage**: Displays local request usage and any rate-limit values returned by OpenRouter.
+- **Manage API Keys (create/rotate/update/delete)**: Lets you programmatically manage your OpenRouter API keys. Requires `OPENROUTER_MANAGEMENT_API_KEY`.
 
 ### Request limits
 
 `OPENROUTER_MAX_REQUESTS` limits chat-completion calls during the current process; model discovery does not consume this local cap. It is an optional safety cap only and defaults to `0` (disabled). It does not replace OpenRouter's account-level limits.
 
 This is a local safety control; OpenRouter's own limits still apply. When the API includes rate-limit headers, the CLI exposes the latest values in **Show Session API Usage**.
+
+## Managing API Keys
+
+When your free-tier API key runs out of requests, you can create or replace keys directly from the CLI using a [Management API Key](https://openrouter.ai/docs/guides/overview/auth/management-api-keys).
+
+1. Create a Management API key at <https://openrouter.ai/settings/management-keys>.
+2. Set it in your `.env`:
+
+   ```env
+   OPENROUTER_MANAGEMENT_API_KEY=your-management-key-goes-here
+   ```
+
+3. Run the CLI and choose **Manage API Keys (create/rotate/update/delete)**. You can:
+
+   - **List API keys** – see all keys, their labels, hashes, usage and limits.
+   - **Create a new API key** – optionally set a credit limit and a `daily`/`weekly`/`monthly` limit reset. The full key string is shown **only once** and copied to your clipboard when possible; you'll be asked whether to write it to `OPENROUTER_API_KEY` in your `.env`.
+   - **Rotate the CLI's active key** – creates a new key and switches the in-memory client to use it immediately, with the same copy/save prompt as Create. The previous key is **left untouched** in your account, so you can disable or delete it manually afterwards if you no longer need it.
+   - **Update an existing key** – change its name, enable/disable it, adjust the credit limit, or set a limit-reset schedule.
+   - **Delete an existing key** – permanently remove a key (with confirmation).
+
+> Management keys are administrative only and cannot be used to call OpenRouter's completion endpoints.
 
 ## Troubleshooting
 
