@@ -110,6 +110,140 @@ class OpenRouterClient:
         """Return the current local session usage without changing it."""
         return self.usage
 
+    @property
+    def has_management_key(self) -> bool:
+        """True when a management API key (and its headers) are configured."""
+        return self.management_headers is not None
+
+    def _ensure_management_headers(self) -> Dict[str, str]:
+        """Return the management headers, raising a clear error when absent."""
+        if not self.management_headers:
+            raise RuntimeError(
+                "This action requires OPENROUTER_MANAGEMENT_API_KEY to be set in your .env file."
+            )
+        return self.management_headers
+
+    def list_keys(self, offset: int = 0) -> List[Dict[str, Any]]:
+        """List the most recent API keys via the management API.
+
+        Uses `offset` for pagination. See:
+        https://openrouter.ai/docs/guides/overview/auth/management-api-keys
+        """
+        headers = self._ensure_management_headers()
+        url = f"{self.base_url}/keys"
+        if offset:
+            url = f"{url}?offset={offset}"
+        try:
+            response = self._request("GET", url, headers=headers)
+            if response is None:
+                return []
+            return response.json().get("data", [])
+        except Exception as error:
+            print(f"Error listing API keys: {error}")
+            return []
+
+    def create_key(
+        self, name: str, limit: Optional[float] = None,
+        limit_reset: Optional[str] = None,
+        include_byok_in_limit: Optional[bool] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Create a new API key. Returns the key record; the plaintext key is
+        exposed under the ``"key"`` field (OpenRouter returns it at the top
+        level of the response, not nested inside ``data``).
+        """
+        headers = self._ensure_management_headers()
+        url = f"{self.base_url}/keys"
+        payload: Dict[str, Any] = {"name": name}
+        if limit is not None:
+            payload["limit"] = limit
+        if limit_reset is not None:
+            payload["limit_reset"] = limit_reset
+        if include_byok_in_limit is not None:
+            payload["include_byok_in_limit"] = include_byok_in_limit
+        try:
+            response = self._request(
+                "POST", url, headers=headers, data=json.dumps(payload)
+            )
+            if response is None:
+                return None
+            body = response.json()
+            data = dict(body.get("data") or {})
+            plaintext = body.get("key")
+            if plaintext and "key" not in data:
+                data["key"] = plaintext
+            return data
+        except Exception as error:
+            print(f"Error creating API key: {error}")
+            return None
+
+    def update_key(
+        self, key_hash: str, name: Optional[str] = None,
+        disabled: Optional[bool] = None, limit: Optional[float] = None,
+        limit_reset: Optional[str] = None,
+        include_byok_in_limit: Optional[bool] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Update an existing API key identified by its hash."""
+        headers = self._ensure_management_headers()
+        url = f"{self.base_url}/keys/{key_hash}"
+        payload: Dict[str, Any] = {}
+        if name is not None:
+            payload["name"] = name
+        if disabled is not None:
+            payload["disabled"] = disabled
+        if limit is not None:
+            payload["limit"] = limit
+        if limit_reset is not None:
+            payload["limit_reset"] = limit_reset
+        if include_byok_in_limit is not None:
+            payload["include_byok_in_limit"] = include_byok_in_limit
+        if not payload:
+            print("Nothing to update: no key attributes were provided.")
+            return None
+        try:
+            response = self._request(
+                "PATCH", url, headers=headers, data=json.dumps(payload)
+            )
+            if response is None:
+                return None
+            return response.json().get("data")
+        except Exception as error:
+            print(f"Error updating API key: {error}")
+            return None
+
+    def delete_key(self, key_hash: str) -> bool:
+        """Delete an API key by its hash. Returns True on success."""
+        headers = self._ensure_management_headers()
+        url = f"{self.base_url}/keys/{key_hash}"
+        try:
+            response = self._request("DELETE", url, headers=headers)
+            if response is None:
+                return False
+            return True
+        except Exception as error:
+            print(f"Error deleting API key: {error}")
+            return False
+
+    def replace_primary_key(
+        self, name: str, limit: Optional[float] = None
+    ) -> Optional[str]:
+        """Create a new key and, on success, switch the CLI's active key to it.
+
+        Useful when the current free-tier key has run out of requests: create a
+        fresh key via the management API and start using it immediately.
+        Returns the new key string on success, or None on failure.
+        """
+        data = self.create_key(name=name, limit=limit)
+        if not data:
+            return None
+        new_key = data.get("key")
+        if not new_key:
+            print("Management API did not return a key string for the new key.")
+            return None
+        # Switch to the new key for all subsequent calls.
+        self.api_key = new_key
+        self.headers["Authorization"] = f"Bearer {new_key}"
+        return new_key
+
     def get_current_key_info(self) -> Optional[Dict[str, Any]]:
         """Fetch provider-authoritative usage and spending limits for this API key."""
         try:

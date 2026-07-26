@@ -188,6 +188,324 @@ def show_cline_config(model):
     console.print(Panel(Markdown(config_text), title="Configuration Helper", border_style="bright_green"))
     questionary.press_any_key_to_continue().ask()
 
+
+def _require_management_key(client) -> bool:
+    """Return True when a management key is configured; otherwise warn the user."""
+    if client.has_management_key:
+        return True
+    console.print(
+        "[bold red]This action requires a Management API Key.[/]\n"
+        "Create one at https://openrouter.ai/settings/management-keys and "
+        "set OPENROUTER_MANAGEMENT_API_KEY in your .env file."
+    )
+    questionary.press_any_key_to_continue().ask()
+    return False
+
+
+def _pick_limit_reset() -> str:
+    return questionary.select(
+        "Limit reset schedule:",
+        choices=["none", "daily", "weekly", "monthly"],
+        default="none",
+    ).ask()
+
+
+def _parse_limit(value: str):
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        console.print("[bold red]Invalid credit limit. Must be a number.[/]")
+        return None
+
+
+def _copy_to_clipboard(text: str) -> bool:
+    """Best-effort copy to clipboard. Returns True on success."""
+    try:
+        import subprocess
+        # Try pbcopy (macOS), then xclip, then xsel (Linux), then clip (Windows)
+        for cmd, splitter in (
+            (["pbcopy"], None),
+            (["xclip", "-selection", "clipboard"], None),
+            (["xsel", "--clipboard", "--input"], None),
+            (["clip"], None),
+        ):
+            try:
+                proc = subprocess.run(cmd, input=text.encode("utf-8"), check=True)
+                return True
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                continue
+    except Exception:
+        pass
+    return False
+
+
+def _update_env_api_key(new_key: str) -> bool:
+    """Persist a new OPENROUTER_API_KEY in the local .env file. Returns True on success."""
+    env_path = ".env"
+    try:
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as fh:
+                lines = fh.readlines()
+            updated = False
+            for i, line in enumerate(lines):
+                if line.startswith("OPENROUTER_API_KEY="):
+                    lines[i] = f"OPENROUTER_API_KEY={new_key}\n"
+                    updated = True
+                    break
+            if updated:
+                with open(env_path, "w", encoding="utf-8") as fh:
+                    fh.writelines(lines)
+            else:
+                with open(env_path, "a", encoding="utf-8") as fh:
+                    if lines and not lines[-1].endswith("\n"):
+                        fh.write("\n")
+                    fh.write(f"OPENROUTER_API_KEY={new_key}\n")
+        else:
+            with open(env_path, "w", encoding="utf-8") as fh:
+                fh.write(f"OPENROUTER_API_KEY={new_key}\n")
+        # Reflect the change in the live environment too.
+        os.environ["OPENROUTER_API_KEY"] = new_key
+        return True
+    except Exception as error:
+        print(f"Error updating .env file: {error}")
+        return False
+
+
+def _offer_key_actions(new_key: str, in_use_now: bool = False):
+    """Show a newly created key and offer to copy it / write it to .env."""
+    console.print(Panel(
+        f"[bold green]Full key (shown only once):[/]\n\n"
+        f"[bold]{new_key}[/]",
+        title="New API Key",
+        border_style="bright_green",
+    ))
+    console.print(
+        "[bold yellow]This full key is shown only once and cannot be retrieved later.[/]"
+    )
+
+    if _copy_to_clipboard(new_key):
+        console.print("[green]Copied to clipboard.[/]")
+    else:
+        console.print(
+            "[dim]Could not copy to clipboard (no pbcopy/xclip/xsel/clip found). "
+            "Copy the key above manually.[/]"
+        )
+
+    save_to_env = questionary.confirm(
+        "Write this key to your .env (OPENROUTER_API_KEY)?",
+        default=True,
+    ).ask()
+    if save_to_env:
+        if _update_env_api_key(new_key):
+            console.print("[bold green].env updated. The key will be used on next launch.[/]")
+            if in_use_now:
+                console.print(
+                    "[green]The CLI is already using this key for the current session.[/]"
+                )
+        else:
+            console.print(
+                "[bold red]Failed to update .env - please add it manually:[/]\n"
+                f"OPENROUTER_API_KEY={new_key}"
+            )
+
+
+def display_keys_table(keys):
+    """Render API keys returned by the management API in a table."""
+    table = Table(title="OpenRouter API Keys", border_style="bright_blue")
+    table.add_column("Name", style="cyan")
+    table.add_column("Label", style="magenta")
+    table.add_column("Hash", style="green")
+    table.add_column("Disabled", style="yellow")
+    table.add_column("Limit (USD)", style="yellow")
+    table.add_column("Remaining", justify="right", style="yellow")
+    table.add_column("Usage", justify="right", style="yellow")
+    table.add_column("Reset", style="cyan")
+
+    for key in keys:
+        table.add_row(
+            str(key.get("name", "N/A")),
+            str(key.get("label", "N/A")),
+            str(key.get("hash", "N/A")),
+            "yes" if key.get("disabled") else "no",
+            str(key.get("limit", "No limit")),
+            str(key.get("limit_remaining", "N/A")),
+            str(key.get("usage", "N/A")),
+            str(key.get("limit_reset", "Never")),
+        )
+    console.print(table)
+
+
+def key_management_menu(client):
+    """Sub-menu for managing API keys via the Management API."""
+    while True:
+        action = questionary.select(
+            "Key management (requires Management API Key) - what would you like to do?",
+            choices=[
+                "List API keys",
+                "Create a new API key",
+                "Rotate the CLI's active key (create & switch)",
+                "Update an existing key",
+                "Delete an existing key",
+                "Back to main menu",
+            ],
+        ).ask()
+
+        if not action or action == "Back to main menu":
+            return
+
+        if not _require_management_key(client):
+            continue
+
+        if action == "List API keys":
+            with console.status("[bold blue]Fetching API keys from OpenRouter...[/]"):
+                keys = client.list_keys()
+            if not keys:
+                console.print("[bold yellow]No keys found or error occurred.[/]")
+            else:
+                display_keys_table(keys)
+            questionary.press_any_key_to_continue().ask()
+            continue
+
+        if action == "Create a new API key":
+            name = questionary.text("Key name:").ask()
+            if not name:
+                continue
+            limit_raw = questionary.text(
+                "Optional credit limit in USD (leave blank for no limit):"
+            ).ask()
+            limit = _parse_limit(limit_raw)
+            if limit_raw and limit is None:
+                questionary.press_any_key_to_continue().ask()
+                continue
+            limit_reset = _pick_limit_reset()
+            limit_reset = None if limit_reset == "none" else limit_reset
+            with console.status("[bold green]Creating API key...[/]"):
+                data = client.create_key(
+                    name=name, limit=limit, limit_reset=limit_reset
+                )
+            if data:
+                console.print(
+                    f"Name: {data.get('name', name)} | "
+                    f"Hash: {data.get('hash', 'N/A')} | "
+                    f"Limit: {data.get('limit', 'No limit')} | "
+                    f"Label: {data.get('label', 'N/A')}"
+                )
+                full_key = data.get("key")
+                if not full_key:
+                    console.print(
+                        "[bold red]The API did not return a full key string. "
+                        "It may already be unavailable.[/]"
+                    )
+                else:
+                    _offer_key_actions(full_key, in_use_now=False)
+            else:
+                console.print("[bold red]Failed to create API key.[/]")
+            questionary.press_any_key_to_continue().ask()
+            continue
+
+        if action == "Rotate the CLI's active key (create & switch)":
+            name = questionary.text(
+                "Name for the new key:", default="OpenRouter CLI (rotated)"
+            ).ask()
+            if not name:
+                continue
+            limit_raw = questionary.text(
+                "Optional credit limit in USD (leave blank for no limit):"
+            ).ask()
+            limit = _parse_limit(limit_raw)
+            if limit_raw and limit is None:
+                questionary.press_any_key_to_continue().ask()
+                continue
+            with console.status("[bold green]Rotating the active key...[/]"):
+                new_key = client.replace_primary_key(name=name, limit=limit)
+            if new_key:
+                _offer_key_actions(new_key, in_use_now=True)
+            else:
+                console.print(
+                    "[bold red]Failed to rotate the active key. The previous key is still in use.[/]"
+                )
+            questionary.press_any_key_to_continue().ask()
+            continue
+
+        # For update/delete we first list keys so the user can pick one.
+        with console.status("[bold blue]Fetching API keys from OpenRouter...[/]"):
+            keys = client.list_keys()
+        if not keys:
+            console.print("[bold yellow]No keys found or error occurred.[/]")
+            questionary.press_any_key_to_continue().ask()
+            continue
+
+        labels = [
+            f"{k.get('name', 'N/A')} ({k.get('label', 'N/A')})" for k in keys
+        ]
+        selected = questionary.select("Select a key:", choices=labels).ask()
+        if not selected:
+            continue
+        key_obj = next(
+            (k for k in keys if f"{k.get('name', 'N/A')} ({k.get('label', 'N/A')})" == selected),
+            None,
+        )
+        if not key_obj:
+            continue
+        key_hash = key_obj.get("hash")
+
+        if action == "Update an existing key":
+            new_name = questionary.text(
+                "New name (leave blank to keep):", default=key_obj.get("name", "")
+            ).ask()
+            disabled_choice = questionary.select(
+                "Disabled state:",
+                choices=["keep", "enable", "disable"],
+                default="keep",
+            ).ask()
+            disabled = None
+            if disabled_choice == "enable":
+                disabled = False
+            elif disabled_choice == "disable":
+                disabled = True
+            limit_raw = questionary.text(
+                "New credit limit in USD (leave blank to keep):"
+            ).ask()
+            limit = _parse_limit(limit_raw)
+            if limit_raw and limit is None:
+                questionary.press_any_key_to_continue().ask()
+                continue
+            limit_reset = _pick_limit_reset()
+            limit_reset = None if limit_reset == "none" else limit_reset
+            with console.status("[bold green]Updating API key...[/]"):
+                updated = client.update_key(
+                    key_hash,
+                    name=(new_name or None),
+                    disabled=disabled,
+                    limit=limit,
+                    limit_reset=limit_reset,
+                )
+            if updated:
+                console.print("[bold green]Key updated successfully.[/]")
+                display_keys_table([updated])
+            else:
+                console.print("[bold red]Failed to update key.[/]")
+        elif action == "Delete an existing key":
+            confirm = questionary.confirm(
+                f"Delete the key '{key_obj.get('name')}'? This cannot be undone.",
+                default=False,
+            ).ask()
+            if not confirm:
+                console.print("[dim]Deletion cancelled.[/]")
+                questionary.press_any_key_to_continue().ask()
+                continue
+            with console.status("[bold red]Deleting API key...[/]"):
+                ok = client.delete_key(key_hash)
+            if ok:
+                console.print("[bold green]Key deleted successfully.[/]")
+            else:
+                console.print("[bold red]Failed to delete key.[/]")
+        questionary.press_any_key_to_continue().ask()
+
+
 def main():
     api_key = load_config()
     max_requests, timeout, management_api_key = load_request_settings()
@@ -211,6 +529,7 @@ def main():
                 "Get Config for Cline/Extensions",
                 "Show OpenRouter API Key Usage (Live)",
                 "Show Session API Usage",
+                "Manage API Keys (create/rotate/update/delete)",
                 "Exit"
             ]
         ).ask()
@@ -218,6 +537,10 @@ def main():
         if choice == "Exit":
             console.print("[bold yellow]Goodbye![/]")
             break
+
+        if choice == "Manage API Keys (create/rotate/update/delete)":
+            key_management_menu(client)
+            continue
 
         if choice == "Show Session API Usage":
             display_request_usage(client)
