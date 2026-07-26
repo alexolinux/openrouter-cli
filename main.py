@@ -25,6 +25,21 @@ def load_config():
         sys.exit(1)
     return api_key
 
+def load_request_settings():
+    """Load optional local request safeguards from the environment."""
+    try:
+        max_requests = int(os.getenv("OPENROUTER_MAX_REQUESTS", "0"))
+        timeout = int(os.getenv("OPENROUTER_REQUEST_TIMEOUT_SECONDS", "30"))
+        if max_requests < 0 or timeout <= 0:
+            raise ValueError
+    except ValueError:
+        console.print(
+            "[bold red]Error:[/] OPENROUTER_MAX_REQUESTS must be 0 or greater and "
+            "OPENROUTER_REQUEST_TIMEOUT_SECONDS must be greater than 0."
+        )
+        sys.exit(1)
+    return max_requests, timeout, os.getenv("OPENROUTER_MANAGEMENT_API_KEY")
+
 def display_models_table(models):
     """Display free models in a rich table"""
     table = Table(title="Available Free LLM Models", border_style="bright_blue")
@@ -43,6 +58,76 @@ def display_models_table(models):
         )
     
     console.print(table)
+
+def display_request_usage(client):
+    """Display diagnostic usage recorded by this CLI process."""
+    usage = client.get_usage()
+    limit = str(client.max_requests) if client.max_requests else "Unlimited"
+    remaining = (
+        str(max(client.max_requests - usage.chat_completions, 0))
+        if client.max_requests else "Unlimited"
+    )
+
+    table = Table(title="Local CLI Session Usage", border_style="bright_blue")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("Requests sent", str(usage.total))
+    table.add_row("Chat-completion requests", str(usage.chat_completions))
+    table.add_row("Successful", str(usage.successful))
+    table.add_row("Failed", str(usage.failed))
+    table.add_row("Blocked by local limit", str(usage.blocked))
+    table.add_row("Session request limit", limit)
+    table.add_row("Requests remaining", remaining)
+    table.add_row("Last response status", str(usage.last_status_code or "N/A"))
+    table.add_row(
+        "Last response time",
+        f"{usage.last_duration_ms} ms" if usage.last_duration_ms is not None else "N/A"
+    )
+    console.print(table)
+
+    if usage.rate_limit_headers:
+        limits = Table(title="Latest API Rate-Limit Headers", border_style="yellow")
+        limits.add_column("Header", style="cyan")
+        limits.add_column("Value", style="yellow")
+        for key, value in sorted(usage.rate_limit_headers.items()):
+            limits.add_row(key, value)
+        console.print(limits)
+    else:
+        console.print("[dim]No rate-limit headers have been returned by the API in this session.[/]")
+
+def display_openrouter_key_usage(client):
+    """Display live usage and configured limits reported by OpenRouter for this key."""
+    with console.status("[bold blue]Fetching API key usage from OpenRouter...[/]"):
+        key_info = client.get_current_key_info()
+        account_requests_today = client.get_account_requests_today()
+
+    if not key_info:
+        console.print("[bold red]OpenRouter did not return API-key usage information.[/]")
+        return
+
+    table = Table(title="OpenRouter API Key Usage (Live)", border_style="bright_green")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("Key label", str(key_info.get("label", "N/A")))
+    table.add_row(
+        "Account AI requests consumed today (UTC)",
+        str(account_requests_today) if account_requests_today is not None
+        else "Requires OPENROUTER_MANAGEMENT_API_KEY"
+    )
+    table.add_row("Free-tier key", str(key_info.get("is_free_tier", "N/A")))
+    table.add_row("Usage (USD)", str(key_info.get("usage", "N/A")))
+    table.add_row("Usage today (USD)", str(key_info.get("usage_daily", "N/A")))
+    table.add_row("Usage this week (USD)", str(key_info.get("usage_weekly", "N/A")))
+    table.add_row("Usage this month (USD)", str(key_info.get("usage_monthly", "N/A")))
+    table.add_row("Configured key limit (USD)", str(key_info.get("limit", "No limit")))
+    table.add_row("Key limit remaining (USD)", str(key_info.get("limit_remaining", "N/A")))
+    table.add_row("Key limit reset", str(key_info.get("limit_reset", "N/A")))
+    table.add_row("Expires at", str(key_info.get("expires_at", "Never")))
+    console.print(table)
+    console.print(
+        "[dim]These values come from OpenRouter for the current API key. "
+        "The request count covers the account and is available with a management API key.[/]"
+    )
 
 def chat_loop(client, model_id, model_name):
     """Interactive chat loop with the selected model"""
@@ -71,6 +156,13 @@ def chat_loop(client, model_id, model_name):
         else:
             console.print("[bold red]Failed to get response from AI.[/]")
 
+        usage = client.get_usage()
+        console.print(
+            f"[dim]Chat requests: {usage.chat_completions}/{client.max_requests if client.max_requests else 'Unlimited'} | "
+            f"Last status: {usage.last_status_code or 'N/A'} | "
+            f"Last response: {usage.last_duration_ms if usage.last_duration_ms is not None else 'N/A'} ms[/]"
+        )
+
 def show_cline_config(model):
     """Display configuration info for Cline/Extensions"""
     clear_screen()
@@ -98,7 +190,11 @@ def show_cline_config(model):
 
 def main():
     api_key = load_config()
-    client = OpenRouterClient(api_key)
+    max_requests, timeout, management_api_key = load_request_settings()
+    client = OpenRouterClient(
+        api_key, max_requests=max_requests, timeout=timeout,
+        management_api_key=management_api_key
+    )
     
     clear_screen()
     console.print(Panel.fit("Welcome to [bold cyan]OpenRouter CLI[/] 🚀\nEasily manage and use OpenRouter's free models.", 
@@ -113,6 +209,8 @@ def main():
                 "List Free Models",
                 "Select Model & Chat",
                 "Get Config for Cline/Extensions",
+                "Show OpenRouter API Key Usage (Live)",
+                "Show Session API Usage",
                 "Exit"
             ]
         ).ask()
@@ -120,6 +218,16 @@ def main():
         if choice == "Exit":
             console.print("[bold yellow]Goodbye![/]")
             break
+
+        if choice == "Show Session API Usage":
+            display_request_usage(client)
+            questionary.press_any_key_to_continue().ask()
+            continue
+
+        if choice == "Show OpenRouter API Key Usage (Live)":
+            display_openrouter_key_usage(client)
+            questionary.press_any_key_to_continue().ask()
+            continue
             
         if choice == "List Free Models" or not free_models:
             with console.status("[bold blue]Fetching free models...[/]"):
